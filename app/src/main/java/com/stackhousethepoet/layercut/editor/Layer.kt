@@ -29,14 +29,19 @@ enum class ToolMode {
     PAINT,
     ERASER,
     RESTORE,
+    MAGIC,
     TRANSFORM
 }
 
 data class BrushSettings(
     val size: Float = 24f,
+    /** 0..1 — at ≥0.98 the engine forces full alpha + hard edge. */
     val opacity: Float = 1f,
     val color: Int = 0xFFFF0000.toInt(),
-    val soft: Boolean = true
+    /** Soft = BlurMaskFilter when opacity is below max; Hard never blurs. Default Hard for punch-through. */
+    val soft: Boolean = false,
+    /** RGB distance tolerance for Magic contiguous fill (8–80 typical). */
+    val magicTolerance: Int = 32
 )
 
 data class CanvasViewport(

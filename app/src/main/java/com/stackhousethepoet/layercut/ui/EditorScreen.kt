@@ -27,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.AddPhotoAlternate
+import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.AutoFixOff
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Layers
@@ -63,19 +64,24 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import com.stackhousethepoet.layercut.editor.BrushEngine
 import com.stackhousethepoet.layercut.editor.EditorViewModel
 import com.stackhousethepoet.layercut.editor.ToolMode
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditorScreen(viewModel: EditorViewModel) {
     val snackbar = remember { SnackbarHostState() }
-    var showLayers by remember { mutableStateOf(true) }
+    // Default hidden so canvas is clear while editing; Layers chip toggles panel.
+    var showLayers by remember { mutableStateOf(false) }
     val hasProject = viewModel.layers.isNotEmpty()
     val showBrushChrome =
         viewModel.toolMode == ToolMode.PAINT ||
             viewModel.toolMode == ToolMode.ERASER ||
             viewModel.toolMode == ToolMode.RESTORE
+    val showMagicChrome = viewModel.toolMode == ToolMode.MAGIC
+    val showPanChrome = viewModel.toolMode == ToolMode.PAN && hasProject
 
     val pickBase = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
@@ -162,10 +168,25 @@ fun EditorScreen(viewModel: EditorViewModel) {
                         HorizontalDivider()
                     }
 
+                    if (showPanChrome) {
+                        val zoomPct = (viewModel.viewport.scale * 100f).roundToInt()
+                        Text(
+                            "Zoom $zoomPct%",
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        )
+                        HorizontalDivider()
+                    }
+
                     if (showBrushChrome) {
+                        val atFull =
+                            viewModel.brushSettings.opacity >= BrushEngine.FULL_OPACITY_THRESHOLD
+                        // Effective hardness: Hard when selected, or forced at 100% opacity.
+                        val effectiveHard = !viewModel.brushSettings.soft || atFull
                         Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
                             Text(
-                                "Brush ${viewModel.brushSettings.size.toInt()}px · opacity ${(viewModel.brushSettings.opacity * 100).toInt()}%",
+                                "Brush ${viewModel.brushSettings.size.toInt()}px · opacity ${(viewModel.brushSettings.opacity * 100).toInt()}%" +
+                                    if (atFull) " · Hard (100%)" else "",
                                 style = MaterialTheme.typography.labelMedium
                             )
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -192,6 +213,29 @@ fun EditorScreen(viewModel: EditorViewModel) {
                                     onValueChange = { viewModel.updateBrush(opacity = it) },
                                     valueRange = 0.05f..1f,
                                     modifier = Modifier.weight(1f)
+                                )
+                            }
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "Edge",
+                                    modifier = Modifier.width(48.dp),
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                                FilterChip(
+                                    selected = effectiveHard,
+                                    onClick = { viewModel.updateBrush(soft = false) },
+                                    label = { Text("Hard") }
+                                )
+                                FilterChip(
+                                    selected = !effectiveHard,
+                                    onClick = {
+                                        // Soft only applies below full opacity; at 100% engine stays Hard.
+                                        viewModel.updateBrush(soft = true)
+                                    },
+                                    label = { Text("Soft") }
                                 )
                             }
                             if (viewModel.toolMode == ToolMode.PAINT) {
@@ -224,6 +268,37 @@ fun EditorScreen(viewModel: EditorViewModel) {
                                         )
                                     }
                                 }
+                            }
+                        }
+                        HorizontalDivider()
+                    }
+
+                    if (showMagicChrome) {
+                        Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+                            Text(
+                                "Magic erase · tolerance ${viewModel.brushSettings.magicTolerance}" +
+                                    if (viewModel.magicBusy) " · working…" else "",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                            Text(
+                                "Tap similar contiguous pixels to clear. Finish edges with Erase/Restore.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "Tol",
+                                    modifier = Modifier.width(48.dp),
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                                Slider(
+                                    value = viewModel.brushSettings.magicTolerance.toFloat(),
+                                    onValueChange = {
+                                        viewModel.updateBrush(magicTolerance = it.roundToInt())
+                                    },
+                                    valueRange = 8f..80f,
+                                    modifier = Modifier.weight(1f)
+                                )
                             }
                         }
                         HorizontalDivider()
@@ -270,6 +345,14 @@ fun EditorScreen(viewModel: EditorViewModel) {
                             viewModel.setTool(ToolMode.RESTORE)
                         }
                         ToolChip(
+                            "Magic",
+                            ToolMode.MAGIC,
+                            viewModel.toolMode,
+                            Icons.Default.AutoFixHigh
+                        ) {
+                            viewModel.setTool(ToolMode.MAGIC)
+                        }
+                        ToolChip(
                             "Move",
                             ToolMode.TRANSFORM,
                             viewModel.toolMode,
@@ -280,7 +363,10 @@ fun EditorScreen(viewModel: EditorViewModel) {
                         FilterChip(
                             selected = showLayers,
                             onClick = { showLayers = !showLayers },
-                            label = { Text("Layers") },
+                            enabled = hasProject,
+                            label = {
+                                Text(if (showLayers) "Layers" else "Layers (hidden)")
+                            },
                             leadingIcon = { Icon(Icons.Default.Layers, null) }
                         )
                     }

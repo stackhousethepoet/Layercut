@@ -3,8 +3,6 @@ package com.stackhousethepoet.layercut.editor
 import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.Color
 import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -19,6 +17,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -51,6 +50,9 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     var revision by mutableIntStateOf(0)
         private set
 
+    var magicBusy by mutableStateOf(false)
+        private set
+
     private val undoStack = UndoStack(30)
     private val brushEngine = BrushEngine()
     private var strokeActive = false
@@ -67,13 +69,20 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         size: Float? = null,
         opacity: Float? = null,
         color: Int? = null,
-        soft: Boolean? = null
+        soft: Boolean? = null,
+        magicTolerance: Int? = null
     ) {
+        var newSoft = soft ?: brushSettings.soft
+        // Sliding opacity to ~100% auto-selects Hard for dramatic punch-through.
+        if (opacity != null && opacity >= BrushEngine.FULL_OPACITY_THRESHOLD && soft == null) {
+            newSoft = false
+        }
         brushSettings = brushSettings.copy(
             size = size ?: brushSettings.size,
             opacity = opacity ?: brushSettings.opacity,
             color = color ?: brushSettings.color,
-            soft = soft ?: brushSettings.soft
+            soft = newSoft,
+            magicTolerance = magicTolerance ?: brushSettings.magicTolerance
         )
     }
 
@@ -127,7 +136,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun updateViewport(scale: Float, offsetX: Float, offsetY: Float) {
         viewport = CanvasViewport(
-            scale = scale.coerceIn(0.1f, 8f),
+            scale = scale.coerceIn(MIN_ZOOM, MAX_ZOOM),
             offsetX = offsetX,
             offsetY = offsetY
         )
@@ -135,8 +144,9 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun panZoomBy(zoomChange: Float, panX: Float, panY: Float, focusX: Float, focusY: Float) {
         val old = viewport
-        val newScale = (old.scale * zoomChange).coerceIn(0.1f, 8f)
-        // Keep focus point stable under zoom
+        val newScale = (old.scale * zoomChange).coerceIn(MIN_ZOOM, MAX_ZOOM)
+        // Keep focus point stable under zoom — pan is not tightly clamped so a
+        // single pixel can sit under the finger at high zoom.
         val worldX = (focusX - old.offsetX) / old.scale
         val worldY = (focusY - old.offsetY) / old.scale
         val newOx = focusX - worldX * newScale + panX
@@ -146,9 +156,6 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun transformActiveLayer(panX: Float, panY: Float, zoom: Float, rotation: Float) {
         val layer = activeLayer ?: return
-        if (!strokeActive) {
-            // Push undo once at start of transform gesture — handled by beginTransform/end
-        }
         val t = layer.transform
         val newScale = (t.scale * zoom).coerceIn(0.05f, 10f)
         updateLayer(layer.id) {
@@ -204,7 +211,6 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                 statusMessage = "Could not add layer"
                 return@launch
             }
-            // Fit into content bounds while preserving aspect
             val fitted = fitIntoCanvas(src, contentWidth.toInt().coerceAtLeast(1), contentHeight.toInt().coerceAtLeast(1))
             if (fitted !== src && !src.isRecycled) src.recycle()
             val layer = createLayer(name = "Layer ${layers.size + 1}", working = fitted)
@@ -241,7 +247,6 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             canvasX, canvasY, viewport, layer, canvasW, canvasH, contentWidth, contentHeight
         )
         brushEngine.appendStroke(lx, ly)
-        // Incremental stamp for live preview feel
         applyBrushStamp(layer, lx, ly)
         bump()
     }
@@ -252,6 +257,44 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         brushEngine.endStroke()
         refreshUndoFlags()
         bump()
+    }
+
+    /**
+     * Magic erase: flood-fill contiguous similar pixels from the tap point to transparent.
+     * Runs on a background thread; undo snapshot is taken before mutate.
+     */
+    fun magicEraseAt(canvasX: Float, canvasY: Float, canvasW: Float, canvasH: Float) {
+        if (toolMode != ToolMode.MAGIC || magicBusy) return
+        val layer = activeLayer ?: return
+        ensureMutable(layer)
+        val working = activeLayer ?: return
+        val (lx, ly) = CoordMath.screenToLayer(
+            canvasX, canvasY, viewport, working, canvasW, canvasH, contentWidth, contentHeight
+        )
+        val px = lx.roundToInt()
+        val py = ly.roundToInt()
+        if (px !in 0 until working.bitmap.width || py !in 0 until working.bitmap.height) {
+            statusMessage = "Tap on the active layer"
+            return
+        }
+
+        undoStack.pushBeforeChange(working)
+        refreshUndoFlags()
+        magicBusy = true
+        val bitmap = working.bitmap
+        val tolerance = brushSettings.magicTolerance
+        viewModelScope.launch {
+            val erased = withContext(Dispatchers.Default) {
+                MagicFill.eraseContiguous(bitmap, px, py, tolerance)
+            }
+            magicBusy = false
+            if (erased) {
+                bump()
+                statusMessage = "Magic erase applied — refine edges with Erase/Restore"
+            } else {
+                statusMessage = "Nothing to erase here"
+            }
+        }
     }
 
     fun undo() {
@@ -454,5 +497,10 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         clearProject()
         super.onCleared()
+    }
+
+    companion object {
+        const val MIN_ZOOM = 0.05f
+        const val MAX_ZOOM = 100f
     }
 }

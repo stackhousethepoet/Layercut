@@ -66,6 +66,18 @@ fun EditorCanvas(
                 else -> false
             }
         }
+        ToolMode.MAGIC -> Modifier.pointerInteropFilter { event ->
+            val w = canvasSize.width.toFloat().coerceAtLeast(1f)
+            val h = canvasSize.height.toFloat().coerceAtLeast(1f)
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    viewModel.magicEraseAt(event.x, event.y, w, h)
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> true
+                else -> true
+            }
+        }
         ToolMode.PAN -> Modifier.pointerInput(tool) {
             awaitEachGesture {
                 awaitFirstDown(requireUnconsumed = false)
