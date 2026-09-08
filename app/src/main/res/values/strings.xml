@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">LayerCut</string>
+    <string name="pick_photo">Pick photo</string>
+    <string name="add_layer">Add layer</string>
+    <string name="export">Export PNG</string>
+    <string name="undo">Undo</string>
+    <string name="redo">Redo</string>
+    <string name="paint">Paint</string>
+    <string name="eraser">Eraser</string>
+    <string name="pan">Pan / zoom</string>
+    <string name="transform">Move layer</string>
+    <string name="layers">Layers</string>
+    <string name="opacity">Opacity</string>
+    <string name="brush_size">Brush size</string>
+    <string name="export_success">Saved to Downloads / Pictures</string>
+    <string name="export_failed">Export failed</string>
+    <string name="empty_hint">Pick a photo to start editing</string>
+</resources>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.LayerCut" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">#FF1B1B1F</item>
+        <item name="android:navigationBarColor">#FF1B1B1F</item>
+        <item name="android:windowBackground">#FF1B1B1F</item>
+        <item name="android:colorPrimary">#FF7C4DFF</item>
+    </style>
+</resources>
