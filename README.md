@@ -1,6 +1,6 @@
 # LayerCut
 
-Sideloadable Android photo layer editor — paint, soft erase/cutout, multi-layer transform, undo/redo, and PNG export.
+Sideloadable Android photo layer editor — paint, soft erase/cutout, restore brush, multi-layer transform, undo/redo, and PNG export.
 
 **Package:** `com.stackhousethepoet.layercut`  
 **Min SDK:** 26 · **Target SDK:** 35 · **UI:** Jetpack Compose Material 3
@@ -12,17 +12,19 @@ Sideloadable Android photo layer editor — paint, soft erase/cutout, multi-laye
 3. Layer list: reorder, visibility, opacity, select active layer; move / scale / rotate the active layer
 4. Paint on the active layer
 5. Soft round eraser clears alpha (precision cutout)
-6. Pinch-zoom and pan the canvas
-7. Undo / redo
-8. Export flattened PNG to `Pictures/LayerCut` via MediaStore
-9. Stylus pressure modulates brush size/opacity when available (finger works without a stylus)
+6. Restore brush paints deleted pixels back from each layer’s original bitmap (same size/opacity/pressure as Erase)
+7. Pinch-zoom and pan the canvas
+8. Undo / redo
+9. Export flattened PNG to `Pictures/LayerCut` via MediaStore
+10. Stylus pressure modulates brush size/opacity when available (finger works without a stylus)
 
 Out of scope: stickers, speech balloons, filters, accounts.
 
 ## Architecture
 
 - **Bitmap-per-layer** document model (`EditorLayer`)
-- **BrushEngine** draws with `Canvas` / `Paint`; eraser uses `PorterDuff.Mode.DST_OUT`
+- **BrushEngine** draws with `Canvas` / `Paint`; eraser uses `PorterDuff.Mode.DST_OUT`; restore copies from `originalBitmap` via soft mask + `SRC_OVER`
+- Each **EditorLayer** keeps an immutable `originalBitmap` for Restore
 - **CanvasViewport** for zoom/pan; layer `LayerTransform` for move/scale/rotate
 - **UndoStack** stores ARGB snapshots before destructive edits
 - **ExportHelper** flattens visible layers and writes PNG through MediaStore
@@ -65,7 +67,7 @@ adb install -r dist/LayerCut-debug.apk
 ## Usage tips
 
 - **Pan** tool: drag to pan, pinch to zoom the canvas
-- **Paint** / **Erase**: draw on the selected layer; stylus pressure is respected when present
+- **Paint** / **Erase** / **Restore**: draw on the selected layer; Restore brushes pixels back from the layer’s original image; stylus pressure is respected when present
 - **Move** tool: drag to reposition; pinch to scale; twist to rotate the active layer
 - Use the layer panel to toggle visibility, opacity, and stacking order
 - **Export** saves a flattened PNG into Pictures/LayerCut

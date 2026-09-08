@@ -46,7 +46,7 @@ fun EditorCanvas(
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
 
     val gestureModifier = when (tool) {
-        ToolMode.PAINT, ToolMode.ERASER -> Modifier.pointerInteropFilter { event ->
+        ToolMode.PAINT, ToolMode.ERASER, ToolMode.RESTORE -> Modifier.pointerInteropFilter { event ->
             val pressure = event.pressure.takeIf { it > 0f } ?: 1f
             val w = canvasSize.width.toFloat().coerceAtLeast(1f)
             val h = canvasSize.height.toFloat().coerceAtLeast(1f)

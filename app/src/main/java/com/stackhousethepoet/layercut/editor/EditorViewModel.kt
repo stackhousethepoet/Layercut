@@ -118,7 +118,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val idx = layers.indexOfFirst { it.id == id }
         if (idx < 0) return
         val removed = layers.removeAt(idx)
-        if (!removed.bitmap.isRecycled) removed.bitmap.recycle()
+        recycleLayerBitmaps(removed)
         if (activeLayerId == id) {
             activeLayerId = layers.getOrNull(min(idx, layers.lastIndex))?.id
         }
@@ -188,7 +188,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             clearProject()
             contentWidth = bmp.width.toFloat()
             contentHeight = bmp.height.toFloat()
-            val layer = EditorLayer(name = "Background", bitmap = bmp)
+            val layer = createLayer(name = "Background", working = bmp)
             layers.add(layer)
             activeLayerId = layer.id
             viewport = CanvasViewport(1f, 0f, 0f)
@@ -207,10 +207,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             // Fit into content bounds while preserving aspect
             val fitted = fitIntoCanvas(src, contentWidth.toInt().coerceAtLeast(1), contentHeight.toInt().coerceAtLeast(1))
             if (fitted !== src && !src.isRecycled) src.recycle()
-            val layer = EditorLayer(
-                name = "Layer ${layers.size + 1}",
-                bitmap = fitted
-            )
+            val layer = createLayer(name = "Layer ${layers.size + 1}", working = fitted)
             layers.add(layer)
             activeLayerId = layer.id
             toolMode = ToolMode.TRANSFORM
@@ -221,20 +218,17 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun beginStroke(canvasX: Float, canvasY: Float, canvasW: Float, canvasH: Float, pressure: Float) {
         val layer = activeLayer ?: return
-        if (toolMode != ToolMode.PAINT && toolMode != ToolMode.ERASER) return
+        if (toolMode != ToolMode.PAINT && toolMode != ToolMode.ERASER && toolMode != ToolMode.RESTORE) return
         ensureMutable(layer)
-        undoStack.pushBeforeChange(layer)
+        val working = activeLayer ?: return
+        undoStack.pushBeforeChange(working)
         refreshUndoFlags()
         strokePressure = if (pressure in 0.01f..1f) pressure else 1f
         val (lx, ly) = CoordMath.screenToLayer(
-            canvasX, canvasY, viewport, layer, canvasW, canvasH, contentWidth, contentHeight
+            canvasX, canvasY, viewport, working, canvasW, canvasH, contentWidth, contentHeight
         )
         brushEngine.beginStroke(lx, ly)
-        brushEngine.stamp(
-            layer.bitmap, lx, ly, brushSettings,
-            erase = toolMode == ToolMode.ERASER,
-            pressureScale = strokePressure
-        )
+        applyBrushStamp(working, lx, ly)
         strokeActive = true
         bump()
     }
@@ -248,11 +242,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         )
         brushEngine.appendStroke(lx, ly)
         // Incremental stamp for live preview feel
-        brushEngine.stamp(
-            layer.bitmap, lx, ly, brushSettings,
-            erase = toolMode == ToolMode.ERASER,
-            pressureScale = strokePressure
-        )
+        applyBrushStamp(layer, lx, ly)
         bump()
     }
 
@@ -356,11 +346,55 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun clearProject() {
-        layers.forEach { if (!it.bitmap.isRecycled) it.bitmap.recycle() }
+        layers.forEach { recycleLayerBitmaps(it) }
         layers.clear()
         undoStack.clear()
         refreshUndoFlags()
         activeLayerId = null
+    }
+
+    private fun createLayer(name: String, working: Bitmap): EditorLayer {
+        val original = working.copy(Bitmap.Config.ARGB_8888, false)
+            ?: working.copy(Bitmap.Config.ARGB_8888, true)
+            ?: working
+        return EditorLayer(name = name, bitmap = working, originalBitmap = original)
+    }
+
+    private fun recycleLayerBitmaps(layer: EditorLayer) {
+        if (!layer.bitmap.isRecycled) layer.bitmap.recycle()
+        if (layer.originalBitmap !== layer.bitmap && !layer.originalBitmap.isRecycled) {
+            layer.originalBitmap.recycle()
+        }
+    }
+
+    private fun applyBrushStamp(layer: EditorLayer, lx: Float, ly: Float) {
+        when (toolMode) {
+            ToolMode.RESTORE -> brushEngine.stampRestore(
+                layer.bitmap,
+                layer.originalBitmap,
+                lx,
+                ly,
+                brushSettings,
+                pressureScale = strokePressure
+            )
+            ToolMode.ERASER -> brushEngine.stamp(
+                layer.bitmap,
+                lx,
+                ly,
+                brushSettings,
+                erase = true,
+                pressureScale = strokePressure
+            )
+            ToolMode.PAINT -> brushEngine.stamp(
+                layer.bitmap,
+                lx,
+                ly,
+                brushSettings,
+                erase = false,
+                pressureScale = strokePressure
+            )
+            else -> Unit
+        }
     }
 
     private suspend fun decodeMutable(uri: Uri): Bitmap? = withContext(Dispatchers.IO) {

@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.PanTool
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -72,7 +73,9 @@ fun EditorScreen(viewModel: EditorViewModel) {
     var showLayers by remember { mutableStateOf(true) }
     val hasProject = viewModel.layers.isNotEmpty()
     val showBrushChrome =
-        viewModel.toolMode == ToolMode.PAINT || viewModel.toolMode == ToolMode.ERASER
+        viewModel.toolMode == ToolMode.PAINT ||
+            viewModel.toolMode == ToolMode.ERASER ||
+            viewModel.toolMode == ToolMode.RESTORE
 
     val pickBase = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
@@ -257,6 +260,14 @@ fun EditorScreen(viewModel: EditorViewModel) {
                             Icons.Default.AutoFixOff
                         ) {
                             viewModel.setTool(ToolMode.ERASER)
+                        }
+                        ToolChip(
+                            "Restore",
+                            ToolMode.RESTORE,
+                            viewModel.toolMode,
+                            Icons.Default.Restore
+                        ) {
+                            viewModel.setTool(ToolMode.RESTORE)
                         }
                         ToolChip(
                             "Move",

@@ -10,10 +10,15 @@ data class LayerTransform(
     val rotationDeg: Float = 0f
 )
 
+/**
+ * @param bitmap Working (mutable) pixels the user paints/erases on.
+ * @param originalBitmap Immutable copy taken at layer creation / load; used by Restore.
+ */
 data class EditorLayer(
     val id: String = UUID.randomUUID().toString(),
     val name: String,
     val bitmap: Bitmap,
+    val originalBitmap: Bitmap,
     val visible: Boolean = true,
     val opacity: Float = 1f,
     val transform: LayerTransform = LayerTransform()
@@ -23,6 +28,7 @@ enum class ToolMode {
     PAN,
     PAINT,
     ERASER,
+    RESTORE,
     TRANSFORM
 }
 
