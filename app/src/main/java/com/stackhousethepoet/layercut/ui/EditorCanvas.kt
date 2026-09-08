@@ -1,7 +1,6 @@
 package com.stackhousethepoet.layercut.ui
 
 import android.graphics.Paint as AndroidPaint
-import android.view.MotionEvent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -11,25 +10,20 @@ import androidx.compose.foundation.gestures.calculateRotation
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.input.pointer.AwaitPointerEventScope
+import androidx.compose.ui.input.pointer.PointerEvent
+import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.pointerInteropFilter
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.input.pointer.positionChanged
 import com.stackhousethepoet.layercut.editor.CoordMath
 import com.stackhousethepoet.layercut.editor.EditorViewModel
 import com.stackhousethepoet.layercut.editor.ToolMode
 
-@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun EditorCanvas(
     viewModel: EditorViewModel,
@@ -43,85 +37,35 @@ fun EditorCanvas(
     val tool = viewModel.toolMode
     val activeId = viewModel.activeLayerId
 
-    var canvasSize by remember { mutableStateOf(IntSize.Zero) }
-
-    val gestureModifier = when (tool) {
-        ToolMode.PAINT, ToolMode.ERASER, ToolMode.RESTORE -> Modifier.pointerInteropFilter { event ->
-            val pressure = event.pressure.takeIf { it > 0f } ?: 1f
-            val w = canvasSize.width.toFloat().coerceAtLeast(1f)
-            val h = canvasSize.height.toFloat().coerceAtLeast(1f)
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    viewModel.beginStroke(event.x, event.y, w, h, pressure)
-                    true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    viewModel.continueStroke(event.x, event.y, w, h, pressure)
-                    true
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    viewModel.endStroke()
-                    true
-                }
-                else -> false
-            }
-        }
-        ToolMode.MAGIC -> Modifier.pointerInteropFilter { event ->
-            val w = canvasSize.width.toFloat().coerceAtLeast(1f)
-            val h = canvasSize.height.toFloat().coerceAtLeast(1f)
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    viewModel.magicEraseAt(event.x, event.y, w, h)
-                    true
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> true
-                else -> true
-            }
-        }
-        ToolMode.PAN -> Modifier.pointerInput(tool) {
-            awaitEachGesture {
-                awaitFirstDown(requireUnconsumed = false)
-                var pressed = true
-                while (pressed) {
-                    val event = awaitPointerEvent()
-                    val zoom = event.calculateZoom()
-                    val pan = event.calculatePan()
-                    val centroid = event.calculateCentroid(useCurrent = true)
-                    if (zoom != 1f || pan != Offset.Zero) {
-                        viewModel.panZoomBy(zoom, pan.x, pan.y, centroid.x, centroid.y)
-                    }
-                    pressed = event.changes.any { it.pressed }
-                }
-            }
-        }
-        ToolMode.TRANSFORM -> Modifier.pointerInput(tool, activeId) {
-            awaitEachGesture {
-                awaitFirstDown(requireUnconsumed = false)
-                viewModel.beginTransformGesture()
-                try {
-                    var pressed = true
-                    while (pressed) {
-                        val event = awaitPointerEvent()
-                        val zoom = event.calculateZoom()
-                        val pan = event.calculatePan()
-                        val rotation = event.calculateRotation()
-                        if (zoom != 1f || pan != Offset.Zero || rotation != 0f) {
-                            viewModel.transformActiveLayer(pan.x, pan.y, zoom, rotation)
-                        }
-                        pressed = event.changes.any { it.pressed }
-                    }
-                } finally {
-                    viewModel.endTransformGesture()
-                }
-            }
-        }
-    }
-
     Canvas(
         modifier = modifier
             .fillMaxSize()
-            .onSizeChanged { canvasSize = it }
-            .then(gestureModifier)
+            .pointerInput(tool, activeId) {
+                val canvasW = size.width.toFloat().coerceAtLeast(1f)
+                val canvasH = size.height.toFloat().coerceAtLeast(1f)
+
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    when (tool) {
+                        ToolMode.TRANSFORM -> handleTransform(viewModel)
+                        ToolMode.PAN -> handleViewportPanZoom(viewModel, canvasW, canvasH)
+                        ToolMode.PAINT, ToolMode.ERASER, ToolMode.RESTORE ->
+                            handleBrushWithPinch(
+                                viewModel = viewModel,
+                                down = down,
+                                canvasW = canvasW,
+                                canvasH = canvasH
+                            )
+                        ToolMode.MAGIC ->
+                            handleMagicWithPinch(
+                                viewModel = viewModel,
+                                down = down,
+                                canvasW = canvasW,
+                                canvasH = canvasH
+                            )
+                    }
+                }
+            }
     ) {
         @Suppress("UNUSED_EXPRESSION")
         revision
@@ -195,5 +139,156 @@ fun EditorCanvas(
 
             nc.restore()
         }
+    }
+}
+
+private fun pressureOf(change: PointerInputChange): Float {
+    val p = change.pressure
+    return if (p in 0.01f..1f) p else 1f
+}
+
+private suspend fun AwaitPointerEventScope.handleTransform(viewModel: EditorViewModel) {
+    viewModel.beginTransformGesture()
+    try {
+        var pressed = true
+        while (pressed) {
+            val event = awaitPointerEvent()
+            val zoom = event.calculateZoom()
+            val pan = event.calculatePan()
+            val rotation = event.calculateRotation()
+            if (zoom != 1f || pan != Offset.Zero || rotation != 0f) {
+                viewModel.transformActiveLayer(pan.x, pan.y, zoom, rotation)
+            }
+            event.changes.forEach { if (it.positionChanged()) it.consume() }
+            pressed = event.changes.any { it.pressed }
+        }
+    } finally {
+        viewModel.endTransformGesture()
+    }
+}
+
+/** Pan tool: one- or two-finger pan/zoom (gallery-style). */
+private suspend fun AwaitPointerEventScope.handleViewportPanZoom(
+    viewModel: EditorViewModel,
+    canvasW: Float,
+    canvasH: Float
+) {
+    var pressed = true
+    while (pressed) {
+        val event = awaitPointerEvent()
+        applyPanZoom(viewModel, event, canvasW, canvasH)
+        event.changes.forEach { if (it.positionChanged()) it.consume() }
+        pressed = event.changes.any { it.pressed }
+    }
+}
+
+/**
+ * Brush tools: one finger paints; a second finger cancels the stroke and switches
+ * to gallery-style pinch zoom / two-finger pan for the rest of the gesture.
+ */
+private suspend fun AwaitPointerEventScope.handleBrushWithPinch(
+    viewModel: EditorViewModel,
+    down: PointerInputChange,
+    canvasW: Float,
+    canvasH: Float
+) {
+    viewModel.beginStroke(
+        down.position.x,
+        down.position.y,
+        canvasW,
+        canvasH,
+        pressureOf(down)
+    )
+    down.consume()
+
+    var panZoomMode = false
+    var active = true
+    while (active) {
+        val event = awaitPointerEvent()
+        val pressedPointers = event.changes.filter { it.pressed }
+
+        if (pressedPointers.isEmpty()) {
+            if (!panZoomMode) viewModel.endStroke()
+            active = false
+            continue
+        }
+
+        if (pressedPointers.size >= 2) {
+            if (!panZoomMode) {
+                viewModel.endStroke()
+                panZoomMode = true
+            }
+            applyPanZoom(viewModel, event, canvasW, canvasH)
+            event.changes.forEach { it.consume() }
+        } else if (!panZoomMode) {
+            val change = pressedPointers.first()
+            viewModel.continueStroke(
+                change.position.x,
+                change.position.y,
+                canvasW,
+                canvasH,
+                pressureOf(change)
+            )
+            change.consume()
+        } else {
+            // After pinch, remaining single finger continues panning.
+            applyPanZoom(viewModel, event, canvasW, canvasH)
+            event.changes.forEach { if (it.positionChanged()) it.consume() }
+        }
+    }
+}
+
+/**
+ * Magic: single-finger tap applies fill; two fingers switch to pan/zoom without
+ * requiring the Pan tool.
+ */
+private suspend fun AwaitPointerEventScope.handleMagicWithPinch(
+    viewModel: EditorViewModel,
+    down: PointerInputChange,
+    canvasW: Float,
+    canvasH: Float
+) {
+    val tapX = down.position.x
+    val tapY = down.position.y
+    down.consume()
+
+    var becameMulti = false
+    var active = true
+    while (active) {
+        val event = awaitPointerEvent()
+        val pressedPointers = event.changes.filter { it.pressed }
+
+        if (pressedPointers.isEmpty()) {
+            if (!becameMulti) {
+                viewModel.magicEraseAt(tapX, tapY, canvasW, canvasH)
+            }
+            active = false
+            continue
+        }
+
+        if (pressedPointers.size >= 2) {
+            becameMulti = true
+            applyPanZoom(viewModel, event, canvasW, canvasH)
+            event.changes.forEach { it.consume() }
+        } else if (becameMulti) {
+            applyPanZoom(viewModel, event, canvasW, canvasH)
+            event.changes.forEach { if (it.positionChanged()) it.consume() }
+        } else {
+            pressedPointers.forEach { it.consume() }
+        }
+    }
+}
+
+private fun applyPanZoom(
+    viewModel: EditorViewModel,
+    event: PointerEvent,
+    canvasW: Float,
+    canvasH: Float
+) {
+    val zoom = event.calculateZoom()
+    val pan = event.calculatePan()
+    val centroid = event.calculateCentroid(useCurrent = true)
+    if (zoom != 1f || pan != Offset.Zero) {
+        viewModel.panZoomBy(zoom, pan.x, pan.y, centroid.x, centroid.y, canvasW, canvasH)
     }
 }

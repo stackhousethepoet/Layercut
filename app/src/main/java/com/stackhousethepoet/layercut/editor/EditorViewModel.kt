@@ -142,16 +142,69 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
-    fun panZoomBy(zoomChange: Float, panX: Float, panY: Float, focusX: Float, focusY: Float) {
+    fun panZoomBy(
+        zoomChange: Float,
+        panX: Float,
+        panY: Float,
+        focusX: Float,
+        focusY: Float,
+        canvasW: Float,
+        canvasH: Float
+    ) {
         val old = viewport
         val newScale = (old.scale * zoomChange).coerceIn(MIN_ZOOM, MAX_ZOOM)
-        // Keep focus point stable under zoom — pan is not tightly clamped so a
-        // single pixel can sit under the finger at high zoom.
-        val worldX = (focusX - old.offsetX) / old.scale
-        val worldY = (focusY - old.offsetY) / old.scale
-        val newOx = focusX - worldX * newScale + panX
-        val newOy = focusY - worldY * newScale + panY
-        viewport = CanvasViewport(newScale, newOx, newOy)
+        // Keep the content point under the focus stable, accounting for the
+        // centered content origin used by EditorCanvas / CoordMath.
+        val originX = canvasW / 2f + old.offsetX - (contentWidth * old.scale) / 2f
+        val originY = canvasH / 2f + old.offsetY - (contentHeight * old.scale) / 2f
+        val contentX = if (old.scale == 0f) 0f else (focusX - originX) / old.scale
+        val contentY = if (old.scale == 0f) 0f else (focusY - originY) / old.scale
+        val rawOx = focusX - canvasW / 2f + (contentWidth * newScale) / 2f - contentX * newScale + panX
+        val rawOy = focusY - canvasH / 2f + (contentHeight * newScale) / 2f - contentY * newScale + panY
+        viewport = clampViewport(newScale, rawOx, rawOy, canvasW, canvasH)
+    }
+
+    /**
+     * Keep the content rectangle reasonably on-screen:
+     * - when scaled content fits the canvas on an axis, force centered offset on that axis
+     * - when zoomed in, clamp so at least ~20% of the content stays intersecting the viewport
+     */
+    private fun clampViewport(
+        scale: Float,
+        offsetX: Float,
+        offsetY: Float,
+        canvasW: Float,
+        canvasH: Float
+    ): CanvasViewport {
+        if (contentWidth <= 0f || contentHeight <= 0f || canvasW <= 0f || canvasH <= 0f) {
+            return CanvasViewport(scale, offsetX, offsetY)
+        }
+        val minVisible = 0.2f
+        val scaledW = contentWidth * scale
+        val scaledH = contentHeight * scale
+        val ox = clampAxisOffset(offsetX, scaledW, canvasW, minVisible)
+        val oy = clampAxisOffset(offsetY, scaledH, canvasH, minVisible)
+        return CanvasViewport(scale, ox, oy)
+    }
+
+    private fun clampAxisOffset(
+        offset: Float,
+        scaledContent: Float,
+        canvasSize: Float,
+        minVisible: Float
+    ): Float {
+        // Content edge in screen space: L = canvas/2 + offset - scaled/2
+        if (scaledContent <= canvasSize) {
+            // Content fits — keep centered (offset ~0) so zoom-out never drifts away.
+            return 0f
+        }
+        val lMin = -(1f - minVisible) * scaledContent
+        val lMax = canvasSize - minVisible * scaledContent
+        val oxMin = lMin - canvasSize / 2f + scaledContent / 2f
+        val oxMax = lMax - canvasSize / 2f + scaledContent / 2f
+        val lo = min(oxMin, oxMax)
+        val hi = max(oxMin, oxMax)
+        return offset.coerceIn(lo, hi)
     }
 
     fun transformActiveLayer(panX: Float, panY: Float, zoom: Float, rotation: Float) {
