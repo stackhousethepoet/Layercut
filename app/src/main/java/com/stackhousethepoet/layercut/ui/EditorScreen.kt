@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -43,6 +44,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -56,6 +58,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
@@ -68,6 +71,8 @@ fun EditorScreen(viewModel: EditorViewModel) {
     val snackbar = remember { SnackbarHostState() }
     var showLayers by remember { mutableStateOf(true) }
     val hasProject = viewModel.layers.isNotEmpty()
+    val showBrushChrome =
+        viewModel.toolMode == ToolMode.PAINT || viewModel.toolMode == ToolMode.ERASER
 
     val pickBase = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
@@ -134,136 +139,172 @@ fun EditorScreen(viewModel: EditorViewModel) {
                     }
                 }
             )
+        },
+        bottomBar = {
+            // Opaque chrome outside the canvas — tools can never be covered by zoom/pan drawing.
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 3.dp,
+                shadowElevation = 6.dp
+            ) {
+                Column(Modifier.fillMaxWidth()) {
+                    if (showLayers && hasProject) {
+                        LayerPanel(
+                            viewModel = viewModel,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(200.dp)
+                        )
+                        HorizontalDivider()
+                    }
+
+                    if (showBrushChrome) {
+                        Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+                            Text(
+                                "Brush ${viewModel.brushSettings.size.toInt()}px · opacity ${(viewModel.brushSettings.opacity * 100).toInt()}%",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "Size",
+                                    modifier = Modifier.width(48.dp),
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                                Slider(
+                                    value = viewModel.brushSettings.size,
+                                    onValueChange = { viewModel.updateBrush(size = it) },
+                                    valueRange = 2f..120f,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "Opacity",
+                                    modifier = Modifier.width(48.dp),
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                                Slider(
+                                    value = viewModel.brushSettings.opacity,
+                                    onValueChange = { viewModel.updateBrush(opacity = it) },
+                                    valueRange = 0.05f..1f,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            if (viewModel.toolMode == ToolMode.PAINT) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    val colors = listOf(
+                                        0xFFFF1744.toInt(),
+                                        0xFFFFEA00.toInt(),
+                                        0xFF00E676.toInt(),
+                                        0xFF2979FF.toInt(),
+                                        0xFFFFFFFF.toInt(),
+                                        0xFF000000.toInt()
+                                    )
+                                    colors.forEach { c ->
+                                        val selected = viewModel.brushSettings.color == c
+                                        Box(
+                                            Modifier
+                                                .size(28.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(c))
+                                                .border(
+                                                    width = if (selected) 3.dp else 1.dp,
+                                                    color = if (selected) {
+                                                        MaterialTheme.colorScheme.primary
+                                                    } else {
+                                                        Color.Gray
+                                                    },
+                                                    shape = CircleShape
+                                                )
+                                                .clickable { viewModel.updateBrush(color = c) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        HorizontalDivider()
+                    }
+
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(onClick = { openBasePicker() }) {
+                            Icon(Icons.Default.PhotoLibrary, contentDescription = null)
+                            Spacer(Modifier.width(4.dp))
+                            Text(if (hasProject) "New" else "Pick photo")
+                        }
+                        TextButton(onClick = { openLayerPicker() }, enabled = hasProject) {
+                            Icon(Icons.Default.AddPhotoAlternate, contentDescription = null)
+                            Spacer(Modifier.width(4.dp))
+                            Text("Add layer")
+                        }
+                        ToolChip("Pan", ToolMode.PAN, viewModel.toolMode, Icons.Default.PanTool) {
+                            viewModel.setTool(ToolMode.PAN)
+                        }
+                        ToolChip("Paint", ToolMode.PAINT, viewModel.toolMode, Icons.Default.Brush) {
+                            viewModel.setTool(ToolMode.PAINT)
+                        }
+                        ToolChip(
+                            "Erase",
+                            ToolMode.ERASER,
+                            viewModel.toolMode,
+                            Icons.Default.AutoFixOff
+                        ) {
+                            viewModel.setTool(ToolMode.ERASER)
+                        }
+                        ToolChip(
+                            "Move",
+                            ToolMode.TRANSFORM,
+                            viewModel.toolMode,
+                            Icons.Default.OpenWith
+                        ) {
+                            viewModel.setTool(ToolMode.TRANSFORM)
+                        }
+                        FilterChip(
+                            selected = showLayers,
+                            onClick = { showLayers = !showLayers },
+                            label = { Text("Layers") },
+                            leadingIcon = { Icon(Icons.Default.Layers, null) }
+                        )
+                    }
+                }
+            }
         }
     ) { padding ->
-        Column(
+        // Canvas lives only between top and bottom chrome; clip so zoom/pan cannot paint over tools.
+        Box(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .clipToBounds()
+                .background(MaterialTheme.colorScheme.background)
         ) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                TextButton(onClick = { openBasePicker() }) {
-                    Icon(Icons.Default.PhotoLibrary, contentDescription = null)
-                    Spacer(Modifier.width(4.dp))
-                    Text(if (hasProject) "New" else "Pick photo")
+            if (!hasProject) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            "Pick a photo to start editing",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        TextButton(onClick = { openBasePicker() }) {
+                            Text("Pick photo")
+                        }
+                    }
                 }
-                TextButton(onClick = { openLayerPicker() }, enabled = hasProject) {
-                    Icon(Icons.Default.AddPhotoAlternate, contentDescription = null)
-                    Spacer(Modifier.width(4.dp))
-                    Text("Add layer")
-                }
-                ToolChip("Pan", ToolMode.PAN, viewModel.toolMode, Icons.Default.PanTool) {
-                    viewModel.setTool(ToolMode.PAN)
-                }
-                ToolChip("Paint", ToolMode.PAINT, viewModel.toolMode, Icons.Default.Brush) {
-                    viewModel.setTool(ToolMode.PAINT)
-                }
-                ToolChip("Erase", ToolMode.ERASER, viewModel.toolMode, Icons.Default.AutoFixOff) {
-                    viewModel.setTool(ToolMode.ERASER)
-                }
-                ToolChip("Move", ToolMode.TRANSFORM, viewModel.toolMode, Icons.Default.OpenWith) {
-                    viewModel.setTool(ToolMode.TRANSFORM)
-                }
-                FilterChip(
-                    selected = showLayers,
-                    onClick = { showLayers = !showLayers },
-                    label = { Text("Layers") },
-                    leadingIcon = { Icon(Icons.Default.Layers, null) }
+            } else {
+                EditorCanvas(
+                    viewModel = viewModel,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clipToBounds()
                 )
-            }
-
-            if (viewModel.toolMode == ToolMode.PAINT || viewModel.toolMode == ToolMode.ERASER) {
-                Column(Modifier.padding(horizontal = 12.dp)) {
-                    Text(
-                        "Brush ${viewModel.brushSettings.size.toInt()}px · opacity ${(viewModel.brushSettings.opacity * 100).toInt()}%",
-                        style = MaterialTheme.typography.labelMedium
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Size", modifier = Modifier.width(48.dp), style = MaterialTheme.typography.labelSmall)
-                        Slider(
-                            value = viewModel.brushSettings.size,
-                            onValueChange = { viewModel.updateBrush(size = it) },
-                            valueRange = 2f..120f,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Opacity", modifier = Modifier.width(48.dp), style = MaterialTheme.typography.labelSmall)
-                        Slider(
-                            value = viewModel.brushSettings.opacity,
-                            onValueChange = { viewModel.updateBrush(opacity = it) },
-                            valueRange = 0.05f..1f,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                    if (viewModel.toolMode == ToolMode.PAINT) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            val colors = listOf(
-                                0xFFFF1744.toInt(),
-                                0xFFFFEA00.toInt(),
-                                0xFF00E676.toInt(),
-                                0xFF2979FF.toInt(),
-                                0xFFFFFFFF.toInt(),
-                                0xFF000000.toInt()
-                            )
-                            colors.forEach { c ->
-                                val selected = viewModel.brushSettings.color == c
-                                Box(
-                                    Modifier
-                                        .size(28.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(c))
-                                        .border(
-                                            width = if (selected) 3.dp else 1.dp,
-                                            color = if (selected) MaterialTheme.colorScheme.primary else Color.Gray,
-                                            shape = CircleShape
-                                        )
-                                        .clickable { viewModel.updateBrush(color = c) }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            Box(
-                Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-            ) {
-                if (!hasProject) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                "Pick a photo to start editing",
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                            Spacer(Modifier.height(12.dp))
-                            TextButton(onClick = { openBasePicker() }) {
-                                Text("Pick photo")
-                            }
-                        }
-                    }
-                } else {
-                    EditorCanvas(viewModel = viewModel, modifier = Modifier.fillMaxSize())
-                }
-
-                if (showLayers && hasProject) {
-                    LayerPanel(
-                        viewModel = viewModel,
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .fillMaxWidth()
-                            .height(220.dp)
-                    )
-                }
             }
         }
     }
