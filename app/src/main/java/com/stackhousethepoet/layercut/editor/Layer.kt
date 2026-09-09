@@ -27,6 +27,8 @@ data class EditorLayer(
 enum class ToolMode {
     PAN,
     PAINT,
+    /** Sample visible composite color into brushSettings.color (auto-returns to PAINT). */
+    EYEDROPPER,
     ERASER,
     RESTORE,
     MAGIC,

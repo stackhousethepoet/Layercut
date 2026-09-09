@@ -10,7 +10,7 @@ Sideloadable Android photo layer editor — paint, hard/soft erase/cutout, resto
 1. Pick a base photo (Android Photo Picker / `GetContent`)
 2. Add additional images as layers
 3. Layer list: reorder, visibility, opacity, select active layer; move / scale / rotate the active layer (panel is **hidden by default** — tap **Layers** chip to show)
-4. Paint on the active layer
+4. Paint on the active layer; **Dropper** samples the topmost visible opaque pixel under your finger into the brush color
 5. Eraser clears alpha (Hard at 100% opacity = full punch-through; Soft below that uses blur)
 6. Restore brush paints deleted pixels back from each layer’s original bitmap
 7. **Magic** erase: tap to flood-fill contiguous similar-color pixels to transparent (wand-style, **not** ML subject cutout — finish edges with Erase/Restore)
@@ -70,6 +70,7 @@ adb install -r dist/LayerCut-debug.apk
 
 - **Pan** tool: drag to pan, pinch to zoom (up to ~10000%); chrome shows current zoom %
 - **Paint** / **Erase** / **Restore**: draw on the selected layer; Hard/Soft edge toggle (100% opacity auto-Hard for solid paint / punch-through erase / full restore)
+- **Dropper**: tap the image to match the paint brush to the color under your finger (topmost visible opaque pixel); returns to Paint after one sample
 - **Magic**: tap a color region to clear contiguous similar pixels; adjust tolerance; refine with Erase/Restore (not an ML cutout)
 - **Move** tool: drag to reposition; pinch to scale; twist to rotate the active layer
 - **Layers** chip: show/hide the layer panel (hidden by default to maximize canvas)

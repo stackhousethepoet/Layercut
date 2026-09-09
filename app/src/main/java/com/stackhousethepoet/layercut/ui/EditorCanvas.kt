@@ -63,6 +63,13 @@ fun EditorCanvas(
                                 canvasW = canvasW,
                                 canvasH = canvasH
                             )
+                        ToolMode.EYEDROPPER ->
+                            handleEyedropperWithPinch(
+                                viewModel = viewModel,
+                                down = down,
+                                canvasW = canvasW,
+                                canvasH = canvasH
+                            )
                     }
                 }
             }
@@ -261,6 +268,46 @@ private suspend fun AwaitPointerEventScope.handleMagicWithPinch(
         if (pressedPointers.isEmpty()) {
             if (!becameMulti) {
                 viewModel.magicEraseAt(tapX, tapY, canvasW, canvasH)
+            }
+            active = false
+            continue
+        }
+
+        if (pressedPointers.size >= 2) {
+            becameMulti = true
+            applyPanZoom(viewModel, event, canvasW, canvasH)
+            event.changes.forEach { it.consume() }
+        } else if (becameMulti) {
+            applyPanZoom(viewModel, event, canvasW, canvasH)
+            event.changes.forEach { if (it.positionChanged()) it.consume() }
+        } else {
+            pressedPointers.forEach { it.consume() }
+        }
+    }
+}
+
+/**
+ * Eyedropper: single-finger tap samples composite color; two fingers pan/zoom.
+ */
+private suspend fun AwaitPointerEventScope.handleEyedropperWithPinch(
+    viewModel: EditorViewModel,
+    down: PointerInputChange,
+    canvasW: Float,
+    canvasH: Float
+) {
+    val tapX = down.position.x
+    val tapY = down.position.y
+    down.consume()
+
+    var becameMulti = false
+    var active = true
+    while (active) {
+        val event = awaitPointerEvent()
+        val pressedPointers = event.changes.filter { it.pressed }
+
+        if (pressedPointers.isEmpty()) {
+            if (!becameMulti) {
+                viewModel.sampleColorAt(tapX, tapY, canvasW, canvasH)
             }
             active = false
             continue

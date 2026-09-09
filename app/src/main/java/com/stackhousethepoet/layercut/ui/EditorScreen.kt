@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.AutoFixOff
 import androidx.compose.material.icons.filled.Brush
+import androidx.compose.material.icons.filled.Colorize
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.PanTool
@@ -80,6 +81,7 @@ fun EditorScreen(viewModel: EditorViewModel) {
         viewModel.toolMode == ToolMode.PAINT ||
             viewModel.toolMode == ToolMode.ERASER ||
             viewModel.toolMode == ToolMode.RESTORE
+    val showEyedropperChrome = viewModel.toolMode == ToolMode.EYEDROPPER
     val showMagicChrome = viewModel.toolMode == ToolMode.MAGIC
     val showPanChrome = viewModel.toolMode == ToolMode.PAN && hasProject
 
@@ -239,7 +241,30 @@ fun EditorScreen(viewModel: EditorViewModel) {
                                 )
                             }
                             if (viewModel.toolMode == ToolMode.PAINT) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Current brush swatch (includes eyedropper picks)
+                                    Box(
+                                        Modifier
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(viewModel.brushSettings.color))
+                                            .border(
+                                                width = 2.dp,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                shape = CircleShape
+                                            )
+                                    )
+                                    FilterChip(
+                                        selected = false,
+                                        onClick = { viewModel.setTool(ToolMode.EYEDROPPER) },
+                                        label = { Text("Dropper") },
+                                        leadingIcon = {
+                                            Icon(Icons.Default.Colorize, contentDescription = null)
+                                        }
+                                    )
                                     val colors = listOf(
                                         0xFFFF1744.toInt(),
                                         0xFFFFEA00.toInt(),
@@ -267,6 +292,39 @@ fun EditorScreen(viewModel: EditorViewModel) {
                                                 .clickable { viewModel.updateBrush(color = c) }
                                         )
                                     }
+                                }
+                            }
+                        }
+                        HorizontalDivider()
+                    }
+
+                    if (showEyedropperChrome) {
+                        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Box(
+                                    Modifier
+                                        .size(32.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(viewModel.brushSettings.color))
+                                        .border(
+                                            width = 2.dp,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            shape = CircleShape
+                                        )
+                                )
+                                Column {
+                                    Text(
+                                        "Dropper — tap to sample color",
+                                        style = MaterialTheme.typography.labelMedium
+                                    )
+                                    Text(
+                                        "Samples the topmost visible pixel under your finger.",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
                             }
                         }
@@ -327,6 +385,14 @@ fun EditorScreen(viewModel: EditorViewModel) {
                         }
                         ToolChip("Paint", ToolMode.PAINT, viewModel.toolMode, Icons.Default.Brush) {
                             viewModel.setTool(ToolMode.PAINT)
+                        }
+                        ToolChip(
+                            "Dropper",
+                            ToolMode.EYEDROPPER,
+                            viewModel.toolMode,
+                            Icons.Default.Colorize
+                        ) {
+                            viewModel.setTool(ToolMode.EYEDROPPER)
                         }
                         ToolChip(
                             "Erase",

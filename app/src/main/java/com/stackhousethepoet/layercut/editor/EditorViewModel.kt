@@ -3,6 +3,7 @@ package com.stackhousethepoet.layercut.editor
 import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -348,6 +349,40 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                 statusMessage = "Nothing to erase here"
             }
         }
+    }
+
+    /**
+     * Eyedropper: sample the topmost visible opaque pixel under the finger
+     * (layer stack top → bottom at that content point) and set brush color
+     * to opaque RGB matching what the user sees. Auto-switches back to Paint.
+     */
+    fun sampleColorAt(canvasX: Float, canvasY: Float, canvasW: Float, canvasH: Float) {
+        if (toolMode != ToolMode.EYEDROPPER) return
+        if (layers.isEmpty() || contentWidth <= 0f || contentHeight <= 0f) return
+
+        // Walk top → bottom so the pixel the user sees wins.
+        for (i in layers.lastIndex downTo 0) {
+            val layer = layers[i]
+            if (!layer.visible || layer.opacity <= 0f || layer.bitmap.isRecycled) continue
+            val (lx, ly) = CoordMath.screenToLayer(
+                canvasX, canvasY, viewport, layer, canvasW, canvasH, contentWidth, contentHeight
+            )
+            val px = lx.roundToInt()
+            val py = ly.roundToInt()
+            if (px !in 0 until layer.bitmap.width || py !in 0 until layer.bitmap.height) continue
+            val pixel = layer.bitmap.getPixel(px, py)
+            val pixelAlpha = Color.alpha(pixel)
+            // Effective visibility: pixel alpha × layer opacity.
+            val effectiveAlpha = (pixelAlpha * layer.opacity.coerceIn(0f, 1f)).roundToInt()
+            if (effectiveAlpha < 16) continue // treat near-transparent as see-through
+            val opaque = Color.argb(255, Color.red(pixel), Color.green(pixel), Color.blue(pixel))
+            updateBrush(color = opaque)
+            toolMode = ToolMode.PAINT
+            statusMessage = "Color sampled"
+            return
+        }
+        statusMessage = "No opaque color here"
+        toolMode = ToolMode.PAINT
     }
 
     fun undo() {
