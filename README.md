@@ -1,6 +1,6 @@
 # LayerCut
 
-Sideloadable Android photo layer editor — paint, hard/soft erase/cutout, restore brush, magic wand erase, multi-layer transform, undo/redo, and PNG export.
+Sideloadable Android photo layer editor — paint, hard/soft erase/cutout, restore brush, magic wand erase, Distort (local bulge/pinch), multi-layer transform, undo/redo, and PNG export.
 
 **Package:** `com.stackhousethepoet.layercut`  
 **Min SDK:** 26 · **Target SDK:** 35 · **UI:** Jetpack Compose Material 3
@@ -14,10 +14,11 @@ Sideloadable Android photo layer editor — paint, hard/soft erase/cutout, resto
 5. Eraser clears alpha (Hard at 100% opacity = full punch-through; Soft below that uses blur)
 6. Restore brush paints deleted pixels back from each layer’s original bitmap
 7. **Magic** erase: tap to flood-fill contiguous similar-color pixels to transparent (wand-style, **not** ML subject cutout — finish edges with Erase/Restore)
-8. Pinch-zoom and pan the canvas (**zoom ~5%–10000%**, i.e. scale `0.05`–`100`; pan is unrestricted so a pixel can sit under your finger)
-9. Undo / redo
-10. Export flattened PNG to `Pictures/LayerCut` via MediaStore
-11. Stylus pressure modulates brush size (and opacity below 100%); at full opacity pressure does not soften alpha
+8. **Distort**: PicSay-style local bulge/pinch on the active layer (liquify warp — not whole-layer transform)
+9. Pinch-zoom and pan the canvas (**zoom ~5%–10000%**, i.e. scale `0.05`–`100`; pan is unrestricted so a pixel can sit under your finger)
+10. Undo / redo
+11. Export flattened PNG to `Pictures/LayerCut` via MediaStore
+12. Stylus pressure modulates brush size (and opacity below 100%); at full opacity pressure does not soften alpha
 
 Out of scope: stickers, speech balloons, filters, accounts, ML subject detection.
 
@@ -26,6 +27,7 @@ Out of scope: stickers, speech balloons, filters, accounts, ML subject detection
 - **Bitmap-per-layer** document model (`EditorLayer`)
 - **BrushEngine** draws with `Canvas` / `Paint`; eraser uses `PorterDuff.Mode.DST_OUT`; restore copies from `originalBitmap` via mask + `SRC_OVER`. Opacity ≥ 98% forces alpha 255 and no `BlurMaskFilter`.
 - **MagicFill** contiguous 4-connected RGB flood-fill erase (background thread)
+- **DistortEngine** radial bulge/pinch with soft falloff on the working bitmap (gesture-start source copy; undo on drag start)
 - Each **EditorLayer** keeps an immutable `originalBitmap` for Restore
 - **CanvasViewport** for zoom/pan (max scale 100×); layer `LayerTransform` for move/scale/rotate
 - **UndoStack** stores ARGB snapshots before destructive edits
@@ -72,6 +74,7 @@ adb install -r dist/LayerCut-debug.apk
 - **Paint** / **Erase** / **Restore**: draw on the selected layer; Hard/Soft edge toggle (100% opacity auto-Hard for solid paint / punch-through erase / full restore)
 - **Dropper**: tap the image to match the paint brush to the color under your finger (topmost visible opaque pixel); returns to Paint after one sample
 - **Magic**: tap a color region to clear contiguous similar pixels; adjust tolerance; refine with Erase/Restore (not an ML cutout)
+- **Distort** (Option B gestures): **tap** sets the warp center (orange crosshair + radius ring). **One-finger drag away** from the center bulges/enlarges that region; **drag toward** the center pinches/shrinks. Soft radial falloff; **Radius** and **Strength** sliders in chrome. Warp applies to the active layer’s working bitmap only (undo before each drag; Restore still uses import `originalBitmap`). **Two-finger** pan/zoom still works in Distort (same as brush tools) — viewport navigation is never stolen by bulge/pinch.
 - **Move** tool: drag to reposition; pinch to scale; twist to rotate the active layer
 - **Layers** chip: show/hide the layer panel (hidden by default to maximize canvas)
 - **Export** saves a flattened PNG into Pictures/LayerCut

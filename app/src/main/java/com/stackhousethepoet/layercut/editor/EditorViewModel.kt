@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.hypot
 import kotlin.math.roundToInt
 
 class EditorViewModel(app: Application) : AndroidViewModel(app) {
@@ -54,16 +55,137 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     var magicBusy by mutableStateOf(false)
         private set
 
+    var distortSettings by mutableStateOf(DistortSettings())
+        private set
+
+    /** Layer-space anchor for Distort; NaN = not set yet. */
+    var distortAnchorX by mutableFloatStateOf(Float.NaN)
+        private set
+    var distortAnchorY by mutableFloatStateOf(Float.NaN)
+        private set
+
+    val hasDistortAnchor: Boolean
+        get() = !distortAnchorX.isNaN() && !distortAnchorY.isNaN()
+
     private val undoStack = UndoStack(30)
     private val brushEngine = BrushEngine()
     private var strokeActive = false
     private var strokePressure = 1f
 
+    private var distortSource: Bitmap? = null
+    private var distortActive = false
+    private var distortAmount = 0f
+    private var distortLastDist = 0f
+    private var distortUndoPushed = false
+
     val activeLayer: EditorLayer?
         get() = layers.find { it.id == activeLayerId }
 
     fun setTool(mode: ToolMode) {
+        if (toolMode == ToolMode.DISTORT && mode != ToolMode.DISTORT) {
+            endDistortGesture()
+            clearDistortAnchor()
+        }
         toolMode = mode
+    }
+
+    fun updateDistort(radius: Float? = null, strength: Float? = null) {
+        distortSettings = distortSettings.copy(
+            radius = (radius ?: distortSettings.radius).coerceIn(12f, 320f),
+            strength = (strength ?: distortSettings.strength).coerceIn(0f, 1f)
+        )
+        bump()
+    }
+
+    fun clearDistortAnchor() {
+        distortAnchorX = Float.NaN
+        distortAnchorY = Float.NaN
+        bump()
+    }
+
+    /** Option B: tap without drag places/replaces the distort center (no undo). */
+    fun setDistortAnchorAt(canvasX: Float, canvasY: Float, canvasW: Float, canvasH: Float) {
+        if (toolMode != ToolMode.DISTORT) return
+        val layer = activeLayer ?: return
+        val (lx, ly) = CoordMath.screenToLayer(
+            canvasX, canvasY, viewport, layer, canvasW, canvasH, contentWidth, contentHeight
+        )
+        distortAnchorX = lx
+        distortAnchorY = ly
+        statusMessage = "Distort center set — drag away to bulge, toward to pinch"
+        bump()
+    }
+
+    /**
+     * Begin a one-finger distort drag. Uses existing anchor, or sets one at the down point.
+     * Pushes an undo snapshot once per gesture and warps from a gesture-start source copy.
+     */
+    fun beginDistortDrag(canvasX: Float, canvasY: Float, canvasW: Float, canvasH: Float) {
+        if (toolMode != ToolMode.DISTORT) return
+        val layer = activeLayer ?: return
+        ensureMutable(layer)
+        val working = activeLayer ?: return
+        val (lx, ly) = CoordMath.screenToLayer(
+            canvasX, canvasY, viewport, working, canvasW, canvasH, contentWidth, contentHeight
+        )
+        if (!hasDistortAnchor) {
+            distortAnchorX = lx
+            distortAnchorY = ly
+        }
+        if (!distortUndoPushed) {
+            undoStack.pushBeforeChange(working)
+            refreshUndoFlags()
+            distortUndoPushed = true
+        }
+        distortSource?.let { if (!it.isRecycled) it.recycle() }
+        distortSource = working.bitmap.copy(Bitmap.Config.ARGB_8888, false)
+            ?: working.bitmap.copy(Bitmap.Config.ARGB_8888, true)
+        distortAmount = 0f
+        val dx = lx - distortAnchorX
+        val dy = ly - distortAnchorY
+        distortLastDist = hypot(dx, dy)
+        distortActive = true
+        bump()
+    }
+
+    fun continueDistortDrag(canvasX: Float, canvasY: Float, canvasW: Float, canvasH: Float) {
+        if (!distortActive || toolMode != ToolMode.DISTORT) return
+        val layer = activeLayer ?: return
+        val source = distortSource ?: return
+        if (source.isRecycled || layer.bitmap.isRecycled) return
+        val (lx, ly) = CoordMath.screenToLayer(
+            canvasX, canvasY, viewport, layer, canvasW, canvasH, contentWidth, contentHeight
+        )
+        val dx = lx - distortAnchorX
+        val dy = ly - distortAnchorY
+        val dist = hypot(dx, dy)
+        val radius = distortSettings.radius.coerceAtLeast(1f)
+        val strength = distortSettings.strength.coerceIn(0f, 1f)
+        val delta = dist - distortLastDist
+        distortLastDist = dist
+        // Radial motion: away (+) = bulge, toward (-) = pinch. Strength scales sensitivity.
+        val step = (delta / radius) * strength * DistortEngine.MAX_AMOUNT * 2.8f
+        distortAmount = (distortAmount + step).coerceIn(-DistortEngine.MAX_AMOUNT, DistortEngine.MAX_AMOUNT)
+        DistortEngine.applyRadialWarp(
+            source,
+            layer.bitmap,
+            distortAnchorX,
+            distortAnchorY,
+            radius,
+            distortAmount
+        )
+        bump()
+    }
+
+    fun endDistortGesture() {
+        if (!distortActive && distortSource == null && !distortUndoPushed) return
+        distortActive = false
+        distortSource?.let { if (!it.isRecycled) it.recycle() }
+        distortSource = null
+        distortUndoPushed = false
+        distortAmount = 0f
+        refreshUndoFlags()
+        bump()
     }
 
     fun updateBrush(
@@ -477,6 +599,8 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun clearProject() {
+        endDistortGesture()
+        clearDistortAnchor()
         layers.forEach { recycleLayerBitmaps(it) }
         layers.clear()
         undoStack.clear()

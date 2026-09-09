@@ -23,6 +23,7 @@ import androidx.compose.ui.input.pointer.positionChanged
 import com.stackhousethepoet.layercut.editor.CoordMath
 import com.stackhousethepoet.layercut.editor.EditorViewModel
 import com.stackhousethepoet.layercut.editor.ToolMode
+import kotlin.math.hypot
 
 @Composable
 fun EditorCanvas(
@@ -65,6 +66,13 @@ fun EditorCanvas(
                             )
                         ToolMode.EYEDROPPER ->
                             handleEyedropperWithPinch(
+                                viewModel = viewModel,
+                                down = down,
+                                canvasW = canvasW,
+                                canvasH = canvasH
+                            )
+                        ToolMode.DISTORT ->
+                            handleDistortWithPinch(
                                 viewModel = viewModel,
                                 down = down,
                                 canvasW = canvasW,
@@ -141,6 +149,26 @@ fun EditorCanvas(
                     active.bitmap.height.toFloat(),
                     outline
                 )
+                // Distort anchor + radius guide in layer space
+                if (tool == ToolMode.DISTORT && viewModel.hasDistortAnchor) {
+                    val ax = viewModel.distortAnchorX
+                    val ay = viewModel.distortAnchorY
+                    val rad = viewModel.distortSettings.radius
+                    val guide = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
+                        style = AndroidPaint.Style.STROKE
+                        strokeWidth = 1.5f / (viewport.scale * active.transform.scale.coerceAtLeast(0.05f))
+                        color = 0xAAFFAB40.toInt()
+                    }
+                    val cross = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
+                        style = AndroidPaint.Style.STROKE
+                        strokeWidth = 2f / (viewport.scale * active.transform.scale.coerceAtLeast(0.05f))
+                        color = 0xFFFFAB40.toInt()
+                    }
+                    nc.drawCircle(ax, ay, rad, guide)
+                    val arm = 10f / active.transform.scale.coerceAtLeast(0.05f)
+                    nc.drawLine(ax - arm, ay, ax + arm, ay, cross)
+                    nc.drawLine(ax, ay - arm, ax, ay + arm, cross)
+                }
                 nc.restore()
             }
 
@@ -323,6 +351,84 @@ private suspend fun AwaitPointerEventScope.handleEyedropperWithPinch(
         } else {
             pressedPointers.forEach { it.consume() }
         }
+    }
+}
+
+
+/**
+ * Distort (Option B): one finger — tap sets warp center; drag away = bulge, toward = pinch.
+ * Two fingers cancel into gallery pan/zoom (same as brush tools). Soft radius/strength from chrome.
+ */
+private suspend fun AwaitPointerEventScope.handleDistortWithPinch(
+    viewModel: EditorViewModel,
+    down: PointerInputChange,
+    canvasW: Float,
+    canvasH: Float
+) {
+    val downX = down.position.x
+    val downY = down.position.y
+    down.consume()
+
+    val dragThresholdPx = 12f
+    var dragged = false
+    var distortStarted = false
+    var panZoomMode = false
+    var active = true
+
+    while (active) {
+        val event = awaitPointerEvent()
+        val pressedPointers = event.changes.filter { it.pressed }
+
+        if (pressedPointers.isEmpty()) {
+            if (panZoomMode) {
+                // viewport only
+            } else if (distortStarted) {
+                viewModel.endDistortGesture()
+            } else if (!dragged) {
+                viewModel.setDistortAnchorAt(downX, downY, canvasW, canvasH)
+            }
+            active = false
+            continue
+        }
+
+        if (pressedPointers.size >= 2) {
+            if (distortStarted && !panZoomMode) {
+                viewModel.endDistortGesture()
+                distortStarted = false
+            }
+            panZoomMode = true
+            applyPanZoom(viewModel, event, canvasW, canvasH)
+            event.changes.forEach { it.consume() }
+            continue
+        }
+
+        if (panZoomMode) {
+            applyPanZoom(viewModel, event, canvasW, canvasH)
+            event.changes.forEach { if (it.positionChanged()) it.consume() }
+            continue
+        }
+
+        val change = pressedPointers.first()
+        val distFromDown = hypot(
+            (change.position.x - downX).toDouble(),
+            (change.position.y - downY).toDouble()
+        ).toFloat()
+        if (!dragged && distFromDown >= dragThresholdPx) {
+            dragged = true
+        }
+        if (dragged) {
+            if (!distortStarted) {
+                viewModel.beginDistortDrag(downX, downY, canvasW, canvasH)
+                distortStarted = true
+            }
+            viewModel.continueDistortDrag(
+                change.position.x,
+                change.position.y,
+                canvasW,
+                canvasH
+            )
+        }
+        change.consume()
     }
 }
 

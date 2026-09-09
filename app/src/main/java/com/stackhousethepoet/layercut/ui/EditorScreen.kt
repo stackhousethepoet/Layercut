@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Colorize
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.PanTool
+import androidx.compose.material.icons.filled.FilterTiltShift
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.SaveAlt
@@ -83,6 +84,7 @@ fun EditorScreen(viewModel: EditorViewModel) {
             viewModel.toolMode == ToolMode.RESTORE
     val showEyedropperChrome = viewModel.toolMode == ToolMode.EYEDROPPER
     val showMagicChrome = viewModel.toolMode == ToolMode.MAGIC
+    val showDistortChrome = viewModel.toolMode == ToolMode.DISTORT
     val showPanChrome = viewModel.toolMode == ToolMode.PAN && hasProject
 
     val pickBase = rememberLauncherForActivityResult(
@@ -362,6 +364,47 @@ fun EditorScreen(viewModel: EditorViewModel) {
                         HorizontalDivider()
                     }
 
+                    if (showDistortChrome) {
+                        Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+                            Text(
+                                "Distort · radius ${viewModel.distortSettings.radius.toInt()}px · strength ${(viewModel.distortSettings.strength * 100).toInt()}%",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                            Text(
+                                "Tap to set center. Drag away = bulge, toward = pinch. Two-finger pans/zooms.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "Radius",
+                                    modifier = Modifier.width(56.dp),
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                                Slider(
+                                    value = viewModel.distortSettings.radius,
+                                    onValueChange = { viewModel.updateDistort(radius = it) },
+                                    valueRange = 12f..320f,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "Strength",
+                                    modifier = Modifier.width(56.dp),
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                                Slider(
+                                    value = viewModel.distortSettings.strength,
+                                    onValueChange = { viewModel.updateDistort(strength = it) },
+                                    valueRange = 0f..1f,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                        HorizontalDivider()
+                    }
+
                     Row(
                         Modifier
                             .fillMaxWidth()
@@ -417,6 +460,14 @@ fun EditorScreen(viewModel: EditorViewModel) {
                             Icons.Default.AutoFixHigh
                         ) {
                             viewModel.setTool(ToolMode.MAGIC)
+                        }
+                        ToolChip(
+                            "Distort",
+                            ToolMode.DISTORT,
+                            viewModel.toolMode,
+                            Icons.Default.FilterTiltShift
+                        ) {
+                            viewModel.setTool(ToolMode.DISTORT)
                         }
                         ToolChip(
                             "Move",

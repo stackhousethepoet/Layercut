@@ -32,6 +32,8 @@ enum class ToolMode {
     ERASER,
     RESTORE,
     MAGIC,
+    /** Local bulge/pinch (liquify) on the active layer bitmap. */
+    DISTORT,
     TRANSFORM
 }
 
@@ -44,6 +46,14 @@ data class BrushSettings(
     val soft: Boolean = false,
     /** RGB distance tolerance for Magic contiguous fill (8–80 typical). */
     val magicTolerance: Int = 32
+)
+
+/** Settings for the Distort (bulge/pinch) tool. */
+data class DistortSettings(
+    /** Effect radius in layer pixels. */
+    val radius: Float = 80f,
+    /** 0..1 — scales how strongly drag toward/away warps. */
+    val strength: Float = 0.55f
 )
 
 data class CanvasViewport(
