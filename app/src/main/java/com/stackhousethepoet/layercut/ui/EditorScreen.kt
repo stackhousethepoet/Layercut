@@ -85,6 +85,7 @@ fun EditorScreen(viewModel: EditorViewModel) {
     val showEyedropperChrome = viewModel.toolMode == ToolMode.EYEDROPPER
     val showMagicChrome = viewModel.toolMode == ToolMode.MAGIC
     val showDistortChrome = viewModel.toolMode == ToolMode.DISTORT
+    val showTransformChrome = viewModel.toolMode == ToolMode.TRANSFORM && hasProject
     val showPanChrome = viewModel.toolMode == ToolMode.PAN && hasProject
 
     val pickBase = rememberLauncherForActivityResult(
@@ -399,6 +400,66 @@ fun EditorScreen(viewModel: EditorViewModel) {
                                     onValueChange = { viewModel.updateDistort(strength = it) },
                                     valueRange = 0f..1f,
                                     modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                        HorizontalDivider()
+                    }
+
+
+                    if (showTransformChrome) {
+                        val active = viewModel.layers.find { it.id == viewModel.activeLayerId }
+                        val layerOpacity = active?.opacity ?: 1f
+                        Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+                            Text(
+                                "Layer opacity ${(layerOpacity * 100).roundToInt()}%",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                            Text(
+                                "Ghost the active layer to line up, then restore to 100%. Not brush opacity.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "Opacity",
+                                    modifier = Modifier.width(56.dp),
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                                Slider(
+                                    value = layerOpacity,
+                                    onValueChange = { v ->
+                                        active?.let { viewModel.setLayerOpacity(it.id, v) }
+                                    },
+                                    valueRange = 0.05f..1f,
+                                    enabled = active != null,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "Quick",
+                                    modifier = Modifier.width(56.dp),
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                                FilterChip(
+                                    selected = layerOpacity in 0.28f..0.32f,
+                                    onClick = {
+                                        active?.let { viewModel.setLayerOpacity(it.id, 0.30f) }
+                                    },
+                                    enabled = active != null,
+                                    label = { Text("30%") }
+                                )
+                                FilterChip(
+                                    selected = layerOpacity >= 0.98f,
+                                    onClick = {
+                                        active?.let { viewModel.setLayerOpacity(it.id, 1f) }
+                                    },
+                                    enabled = active != null,
+                                    label = { Text("100%") }
                                 )
                             }
                         }

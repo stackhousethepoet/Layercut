@@ -389,12 +389,14 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             }
             val fitted = fitIntoCanvas(src, contentWidth.toInt().coerceAtLeast(1), contentHeight.toInt().coerceAtLeast(1))
             if (fitted !== src && !src.isRecycled) src.recycle()
+            // Ghost new overlays so alignment against the base photo is obvious in Move mode.
             val layer = createLayer(name = "Layer ${layers.size + 1}", working = fitted)
+                .copy(opacity = 0.35f)
             layers.add(layer)
             activeLayerId = layer.id
             toolMode = ToolMode.TRANSFORM
             bump()
-            statusMessage = "Layer added"
+            statusMessage = "Ghosted for alignment — raise opacity when placed."
         }
     }
 

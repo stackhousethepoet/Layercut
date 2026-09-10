@@ -75,7 +75,8 @@ adb install -r dist/LayerCut-debug.apk
 - **Dropper**: tap the image to match the paint brush to the color under your finger (topmost visible opaque pixel); returns to Paint after one sample
 - **Magic**: tap a color region to clear contiguous similar pixels; adjust tolerance; refine with Erase/Restore (not an ML cutout)
 - **Distort** (Option B gestures): **tap** sets the warp center (orange crosshair + radius ring). **One-finger drag away** from the center bulges/enlarges that region; **drag toward** the center pinches/shrinks. Soft radial falloff; **Radius** and **Strength** sliders in chrome. Warp applies to the active layer’s working bitmap only (undo before each drag; Restore still uses import `originalBitmap`). **Two-finger** pan/zoom still works in Distort (same as brush tools) — viewport navigation is never stolen by bulge/pinch.
-- **Move** tool: drag to reposition; pinch to scale; twist to rotate the active layer
+- **Move** tool: drag to reposition; pinch to scale; twist to rotate the active layer. Bottom chrome shows a **Layer opacity** slider (plus **30%** / **100%** chips) for the active layer — separate from brush opacity. New overlay layers start ghosted at **35%** so you can line them up against the base photo, then raise opacity (or tap **100%**) before erasing/painting.
+- **Alignment workflow**: Add layer → Move (ghosted) → line up with Layer opacity ~30% → raise to 100% → Erase/Paint as needed
 - **Layers** chip: show/hide the layer panel (hidden by default to maximize canvas)
 - **Export** saves a flattened PNG into Pictures/LayerCut
 
