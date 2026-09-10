@@ -38,7 +38,12 @@ enum class ToolMode {
 }
 
 data class BrushSettings(
-    val size: Float = 24f,
+    /**
+     * Brush diameter in **on-screen pixels** (what the finger sees).
+     * ViewModel converts to layer pixels via viewport × layer scale when stamping.
+     * Slider range: [BrushEngine.SCREEN_SIZE_MIN]..[BrushEngine.SCREEN_SIZE_MAX].
+     */
+    val size: Float = 40f,
     /** 0..1 — at ≥0.98 the engine forces full alpha + hard edge. */
     val opacity: Float = 1f,
     val color: Int = 0xFFFF0000.toInt(),

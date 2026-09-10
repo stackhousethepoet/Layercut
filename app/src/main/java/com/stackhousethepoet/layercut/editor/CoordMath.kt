@@ -2,6 +2,7 @@ package com.stackhousethepoet.layercut.editor
 
 import android.graphics.Matrix
 import kotlin.math.cos
+import kotlin.math.max
 import kotlin.math.sin
 
 /**
@@ -43,6 +44,21 @@ object CoordMath {
         x = rx / s + cx
         y = ry / s + cy
         return x to y
+    }
+
+    /**
+     * Convert a brush diameter measured in on-screen pixels into layer bitmap pixels.
+     * Combined scale = viewport zoom × layer transform scale (same factors CoordMath
+     * uses when mapping points). Classic screen-space brush: zoom out → larger tip
+     * in layer space; zoom in → finer control.
+     */
+    fun screenBrushSizeToLayer(
+        screenSize: Float,
+        viewport: CanvasViewport,
+        layer: EditorLayer
+    ): Float {
+        val combined = max(viewport.scale * layer.transform.scale, 1e-3f)
+        return screenSize / combined
     }
 
     fun layerDrawMatrix(layer: EditorLayer): Matrix {

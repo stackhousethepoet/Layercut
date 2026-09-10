@@ -67,6 +67,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.stackhousethepoet.layercut.editor.BrushEngine
+import com.stackhousethepoet.layercut.editor.CoordMath
 import com.stackhousethepoet.layercut.editor.EditorViewModel
 import com.stackhousethepoet.layercut.editor.ToolMode
 import kotlin.math.roundToInt
@@ -189,8 +190,20 @@ fun EditorScreen(viewModel: EditorViewModel) {
                         // Effective hardness: Hard when selected, or forced at 100% opacity.
                         val effectiveHard = !viewModel.brushSettings.soft || atFull
                         Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+                            val screenPx = viewModel.brushSettings.size
+                            val active = viewModel.activeLayer
+                            val tipLabel = if (active != null && !active.bitmap.isRecycled) {
+                                val layerPx = CoordMath.screenBrushSizeToLayer(
+                                    screenPx, viewModel.viewport, active
+                                )
+                                val ref = maxOf(active.bitmap.width, active.bitmap.height).coerceAtLeast(1)
+                                val pct = ((layerPx / ref) * 100f).roundToInt().coerceIn(0, 999)
+                                "Brush ${screenPx.toInt()} · ~$pct% of layer"
+                            } else {
+                                "Brush ${screenPx.toInt()}px"
+                            }
                             Text(
-                                "Brush ${viewModel.brushSettings.size.toInt()}px · opacity ${(viewModel.brushSettings.opacity * 100).toInt()}%" +
+                                "$tipLabel · opacity ${(viewModel.brushSettings.opacity * 100).toInt()}%" +
                                     if (atFull) " · Hard (100%)" else "",
                                 style = MaterialTheme.typography.labelMedium
                             )
@@ -203,7 +216,7 @@ fun EditorScreen(viewModel: EditorViewModel) {
                                 Slider(
                                     value = viewModel.brushSettings.size,
                                     onValueChange = { viewModel.updateBrush(size = it) },
-                                    valueRange = 2f..120f,
+                                    valueRange = BrushEngine.SCREEN_SIZE_MIN..BrushEngine.SCREEN_SIZE_MAX,
                                     modifier = Modifier.weight(1f)
                                 )
                             }

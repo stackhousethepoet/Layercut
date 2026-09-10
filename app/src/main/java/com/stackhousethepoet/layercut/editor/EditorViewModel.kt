@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.net.Uri
+import android.os.SystemClock
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -71,6 +72,10 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private val brushEngine = BrushEngine()
     private var strokeActive = false
     private var strokePressure = 1f
+    private var lastStampX = 0f
+    private var lastStampY = 0f
+    private var hasLastStamp = false
+    private var lastStrokeBumpMs = 0L
 
     private var distortSource: Bitmap? = null
     private var distortActive = false
@@ -201,7 +206,10 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             newSoft = false
         }
         brushSettings = brushSettings.copy(
-            size = size ?: brushSettings.size,
+            size = (size ?: brushSettings.size).coerceIn(
+                BrushEngine.SCREEN_SIZE_MIN,
+                BrushEngine.SCREEN_SIZE_MAX
+            ),
             opacity = opacity ?: brushSettings.opacity,
             color = color ?: brushSettings.color,
             soft = newSoft,
@@ -412,8 +420,13 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             canvasX, canvasY, viewport, working, canvasW, canvasH, contentWidth, contentHeight
         )
         brushEngine.beginStroke(lx, ly)
-        applyBrushStamp(working, lx, ly)
+        val layerSettings = brushSettingsForLayer(working)
+        applyBrushStamp(working, lx, ly, layerSettings)
+        lastStampX = lx
+        lastStampY = ly
+        hasLastStamp = true
         strokeActive = true
+        lastStrokeBumpMs = SystemClock.uptimeMillis()
         bump()
     }
 
@@ -425,13 +438,15 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             canvasX, canvasY, viewport, layer, canvasW, canvasH, contentWidth, contentHeight
         )
         brushEngine.appendStroke(lx, ly)
-        applyBrushStamp(layer, lx, ly)
-        bump()
+        val layerSettings = brushSettingsForLayer(layer)
+        stampAlongSegment(layer, lx, ly, layerSettings)
+        maybeBumpDuringStroke()
     }
 
     fun endStroke() {
         if (!strokeActive) return
         strokeActive = false
+        hasLastStamp = false
         brushEngine.endStroke()
         refreshUndoFlags()
         bump()
@@ -603,6 +618,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private fun clearProject() {
         endDistortGesture()
         clearDistortAnchor()
+        brushEngine.releasePool()
         layers.forEach { recycleLayerBitmaps(it) }
         layers.clear()
         undoStack.clear()
@@ -624,21 +640,79 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun applyBrushStamp(layer: EditorLayer, lx: Float, ly: Float) {
+    /** Convert screen-space slider size into layer pixels for the active layer. */
+    private fun brushSettingsForLayer(layer: EditorLayer): BrushSettings {
+        val layerSize = CoordMath.screenBrushSizeToLayer(brushSettings.size, viewport, layer)
+        return brushSettings.copy(size = layerSize)
+    }
+
+    /**
+     * Place stamps along the segment from the last stamp to (lx, ly) with spacing
+     * ≈ 0.4 × brush radius so fast swipes stay continuous without per-event floods.
+     */
+    private fun stampAlongSegment(
+        layer: EditorLayer,
+        lx: Float,
+        ly: Float,
+        layerSettings: BrushSettings
+    ) {
+        if (!hasLastStamp) {
+            applyBrushStamp(layer, lx, ly, layerSettings)
+            lastStampX = lx
+            lastStampY = ly
+            hasLastStamp = true
+            return
+        }
+        val radius = max(0.5f, layerSettings.size * strokePressure.coerceIn(0.15f, 2f) / 2f)
+        val spacing = max(0.5f, radius * BrushEngine.STAMP_SPACING_FACTOR)
+        val dist = hypot(lx - lastStampX, ly - lastStampY)
+        if (dist < spacing) return
+        val inv = 1f / dist
+        val dx = (lx - lastStampX) * inv
+        val dy = (ly - lastStampY) * inv
+        var traveled = spacing
+        var lastX = lastStampX
+        var lastY = lastStampY
+        while (traveled <= dist + 1e-3f) {
+            val sx = lastStampX + dx * traveled
+            val sy = lastStampY + dy * traveled
+            applyBrushStamp(layer, sx, sy, layerSettings)
+            lastX = sx
+            lastY = sy
+            traveled += spacing
+        }
+        lastStampX = lastX
+        lastStampY = lastY
+    }
+
+    private fun maybeBumpDuringStroke() {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastStrokeBumpMs >= BrushEngine.STROKE_BUMP_INTERVAL_MS) {
+            lastStrokeBumpMs = now
+            bump()
+        }
+    }
+
+    private fun applyBrushStamp(
+        layer: EditorLayer,
+        lx: Float,
+        ly: Float,
+        settings: BrushSettings
+    ) {
         when (toolMode) {
             ToolMode.RESTORE -> brushEngine.stampRestore(
                 layer.bitmap,
                 layer.originalBitmap,
                 lx,
                 ly,
-                brushSettings,
+                settings,
                 pressureScale = strokePressure
             )
             ToolMode.ERASER -> brushEngine.stamp(
                 layer.bitmap,
                 lx,
                 ly,
-                brushSettings,
+                settings,
                 erase = true,
                 pressureScale = strokePressure
             )
@@ -646,7 +720,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                 layer.bitmap,
                 lx,
                 ly,
-                brushSettings,
+                settings,
                 erase = false,
                 pressureScale = strokePressure
             )

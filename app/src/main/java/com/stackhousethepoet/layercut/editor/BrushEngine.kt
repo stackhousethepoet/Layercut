@@ -3,6 +3,7 @@ package com.stackhousethepoet.layercut.editor
 import android.graphics.Bitmap
 import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PorterDuff
@@ -22,6 +23,9 @@ import kotlin.math.sqrt
  *
  * Opacity ≥ 0.98 (UI 100%): full alpha 255 + hard edge (no BlurMaskFilter); pressure
  * does not reduce alpha. Below that: optional soft blur + aggressive opacity ease.
+ *
+ * [BrushSettings.size] is expected in **layer pixels** by the time it reaches stamp/
+ * commit (ViewModel converts from screen-space slider values).
  */
 class BrushEngine {
 
@@ -36,6 +40,20 @@ class BrushEngine {
     private var lastX = 0f
     private var lastY = 0f
     private var hasPoint = false
+
+    /** Reusable scratch for restore stamps (avoids full-layer / per-move alloc). */
+    private var restorePool: Bitmap? = null
+
+    private val stampPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
+    private val restoreMaskPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.WHITE
+        xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
+    }
+    private val restoreOutPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val hardClipPath = Path()
 
     fun beginStroke(x: Float, y: Float) {
         path.reset()
@@ -81,15 +99,15 @@ class BrushEngine {
 
         if (erase) {
             strokePaint.xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
-            strokePaint.color = android.graphics.Color.argb(params.alpha, 0, 0, 0)
+            strokePaint.color = Color.argb(params.alpha, 0, 0, 0)
         } else {
             strokePaint.xfermode = null
             val c = settings.color
-            strokePaint.color = android.graphics.Color.argb(
+            strokePaint.color = Color.argb(
                 params.alpha,
-                android.graphics.Color.red(c),
-                android.graphics.Color.green(c),
-                android.graphics.Color.blue(c)
+                Color.red(c),
+                Color.green(c),
+                Color.blue(c)
             )
         }
 
@@ -126,7 +144,7 @@ class BrushEngine {
                 strokeCap = Paint.Cap.ROUND
                 strokeJoin = Paint.Join.ROUND
                 strokeWidth = params.size
-                color = android.graphics.Color.WHITE
+                color = Color.WHITE
                 xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
                 if (params.useSoft) {
                     maskFilter = BlurMaskFilter(params.size * 0.35f, BlurMaskFilter.Blur.NORMAL)
@@ -154,29 +172,33 @@ class BrushEngine {
     ) {
         if (target.isRecycled) return
         val params = resolveParams(settings, pressureScale)
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.FILL
-            if (params.useSoft) {
-                maskFilter = BlurMaskFilter(params.size * 0.35f, BlurMaskFilter.Blur.NORMAL)
-            }
-            if (erase) {
-                xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
-                color = android.graphics.Color.argb(params.alpha, 0, 0, 0)
-            } else {
-                val c = settings.color
-                color = android.graphics.Color.argb(
-                    params.alpha,
-                    android.graphics.Color.red(c),
-                    android.graphics.Color.green(c),
-                    android.graphics.Color.blue(c)
-                )
-            }
+        stampPaint.maskFilter = if (params.useSoft) {
+            BlurMaskFilter(params.size * 0.35f, BlurMaskFilter.Blur.NORMAL)
+        } else {
+            null
         }
-        Canvas(target).drawCircle(x, y, params.size / 2f, paint)
+        if (erase) {
+            stampPaint.xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
+            stampPaint.color = Color.argb(params.alpha, 0, 0, 0)
+        } else {
+            stampPaint.xfermode = null
+            val c = settings.color
+            stampPaint.color = Color.argb(
+                params.alpha,
+                Color.red(c),
+                Color.green(c),
+                Color.blue(c)
+            )
+        }
+        Canvas(target).drawCircle(x, y, params.size / 2f, stampPaint)
+        stampPaint.xfermode = null
+        stampPaint.maskFilter = null
     }
 
     /**
      * Restore stamp: circle mask copies pixels from [original] onto [target].
+     * Clipped to brush bounds; reuses a pooled temp bitmap. Hard + full opacity uses
+     * a cheap clipPath path (no temp alloc).
      */
     fun stampRestore(
         target: Bitmap,
@@ -202,33 +224,76 @@ class BrushEngine {
 
         val tw = right - left
         val th = bottom - top
-        val temp = Bitmap.createBitmap(tw, th, Bitmap.Config.ARGB_8888)
-        try {
-            val tempCanvas = Canvas(temp)
-            val srcRect = Rect(left, top, right, bottom)
-            val dstRect = RectF(0f, 0f, tw.toFloat(), th.toFloat())
-            tempCanvas.drawBitmap(original, srcRect, dstRect, null)
-            val cx = x - left
-            val cy = y - top
-            val maskPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                style = Paint.Style.FILL
-                color = android.graphics.Color.WHITE
-                xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
-                if (params.useSoft) {
-                    maskFilter = BlurMaskFilter(params.size * 0.35f, BlurMaskFilter.Blur.NORMAL)
-                }
-            }
-            tempCanvas.drawCircle(cx, cy, radius, maskPaint)
-            val outPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.alpha = params.alpha }
-            Canvas(target).drawBitmap(temp, left.toFloat(), top.toFloat(), outPaint)
-        } finally {
-            temp.recycle()
+        val srcRect = Rect(left, top, right, bottom)
+        val dstRect = Rect(left, top, right, bottom)
+
+        // Hard + full opacity: clip circle and blit original region only (no temp).
+        if (!params.useSoft && params.alpha >= 255) {
+            val canvas = Canvas(target)
+            hardClipPath.reset()
+            hardClipPath.addCircle(x, y, radius, Path.Direction.CW)
+            canvas.save()
+            canvas.clipPath(hardClipPath)
+            canvas.drawBitmap(original, srcRect, dstRect, null)
+            canvas.restore()
+            return
         }
+
+        val temp = obtainRestoreTemp(tw, th)
+        val tempCanvas = Canvas(temp)
+        temp.eraseColor(Color.TRANSPARENT)
+        val localDst = RectF(0f, 0f, tw.toFloat(), th.toFloat())
+        tempCanvas.drawBitmap(original, srcRect, localDst, null)
+        val cx = x - left
+        val cy = y - top
+        restoreMaskPaint.maskFilter = if (params.useSoft) {
+            BlurMaskFilter(params.size * 0.35f, BlurMaskFilter.Blur.NORMAL)
+        } else {
+            null
+        }
+        tempCanvas.drawCircle(cx, cy, radius, restoreMaskPaint)
+        restoreMaskPaint.maskFilter = null
+        restoreOutPaint.alpha = params.alpha
+        val outSrc = Rect(0, 0, tw, th)
+        val outDst = RectF(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat())
+        Canvas(target).drawBitmap(temp, outSrc, outDst, restoreOutPaint)
+    }
+
+    private fun obtainRestoreTemp(w: Int, h: Int): Bitmap {
+        val existing = restorePool
+        if (existing != null && !existing.isRecycled &&
+            existing.width >= w && existing.height >= h
+        ) {
+            return existing
+        }
+        existing?.let { if (!it.isRecycled) it.recycle() }
+        // Grow with a little headroom so scrubbing with similar sizes reuses.
+        val bw = max(w, ((w + 15) / 16) * 16)
+        val bh = max(h, ((h + 15) / 16) * 16)
+        val created = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
+        restorePool = created
+        return created
+    }
+
+    /** Release pooled scratch (optional; bitmaps also GC with the engine). */
+    fun releasePool() {
+        restorePool?.let { if (!it.isRecycled) it.recycle() }
+        restorePool = null
     }
 
     companion object {
         /** Opacity at or above this is treated as UI 100% — full punch-through. */
         const val FULL_OPACITY_THRESHOLD = 0.98f
+
+        /** Stamp when finger moves at least this fraction of brush radius (layer px). */
+        const val STAMP_SPACING_FACTOR = 0.4f
+
+        /** Min interval between revision bumps during an active stroke (ms). ~60fps. */
+        const val STROKE_BUMP_INTERVAL_MS = 16L
+
+        /** Screen-space brush size slider range. */
+        const val SCREEN_SIZE_MIN = 4f
+        const val SCREEN_SIZE_MAX = 400f
 
         fun distance(x1: Float, y1: Float, x2: Float, y2: Float): Float =
             hypot(x2 - x1, y2 - y1)
