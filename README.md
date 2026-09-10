@@ -9,7 +9,7 @@ Sideloadable Android photo layer editor — paint, hard/soft erase/cutout, resto
 
 1. Pick a base photo (Android Photo Picker / `GetContent`)
 2. Add additional images as layers
-3. Layer list: reorder, visibility, opacity, select active layer; move / scale / rotate the active layer (panel is **hidden by default** — tap **Layers** chip to show)
+3. Layer list: reorder, visibility, opacity, select active layer; move / scale / rotate the active layer (panel is **hidden by default** — open **Layers** in the bottom tool menu → **Show layer list**)
 4. Paint on the active layer; **Dropper** samples the topmost visible opaque pixel under your finger into the brush color
 5. Eraser clears alpha (Hard at 100% opacity = full punch-through; Soft below that uses blur)
 6. Restore brush paints deleted pixels back from each layer’s original bitmap
@@ -70,14 +70,25 @@ adb install -r dist/LayerCut-debug.apk
 
 ## Usage tips
 
-- **Pan** tool: drag to pan, pinch to zoom (up to ~10000%); chrome shows current zoom %
+### Bottom tool chrome
+
+Tools are grouped into four category boxes — **Paint** · **Cut** · **Warp** · **Layers** — instead of one long horizontal strip. Tap a category to expand its submenu; tap a tool to select it (settings strip appears) and the category menu **auto-collapses** so the canvas stays clear. A floating **Tools** handle on the **left** edge (with the active tool name pill) brings the menu back. Use the chevron on the category row to hide the menu without changing tools. **New/Pick photo**, **Add layer**, Undo/Redo, and Export stay in the top bar.
+
+- **Paint** menu: Paint, Dropper
+- **Cut** menu: Erase, Restore, Magic
+- **Warp** menu: Distort, Move, Pan
+- **Layers** menu: Show/Hide layer list, Add layer shortcut
+
+### Tools
+
+- **Pan** tool: drag to pan, pinch to zoom (up to ~10000%); settings strip shows current zoom %
 - **Paint** / **Erase** / **Restore**: draw on the selected layer; Hard/Soft edge toggle (100% opacity auto-Hard for solid paint / punch-through erase / full restore). **Brush size is screen-relative** — zoom out + max size covers more of the image; zoom in for finer control.
 - **Dropper**: tap the image to match the paint brush to the color under your finger (topmost visible opaque pixel); returns to Paint after one sample
 - **Magic**: tap a color region to clear contiguous similar pixels; adjust tolerance; refine with Erase/Restore (not an ML cutout)
 - **Distort** (Option B gestures): **tap** sets the warp center (orange crosshair + radius ring). **One-finger drag away** from the center bulges/enlarges that region; **drag toward** the center pinches/shrinks. Soft radial falloff; **Radius** and **Strength** sliders in chrome. Warp applies to the active layer’s working bitmap only (undo before each drag; Restore still uses import `originalBitmap`). **Two-finger** pan/zoom still works in Distort (same as brush tools) — viewport navigation is never stolen by bulge/pinch.
-- **Move** tool: drag to reposition; pinch to scale; twist to rotate the active layer. Bottom chrome shows a **Layer opacity** slider (plus **30%** / **100%** chips) for the active layer — separate from brush opacity. New overlay layers start ghosted at **35%** so you can line them up against the base photo, then raise opacity (or tap **100%**) before erasing/painting.
+- **Move** tool: drag to reposition; pinch to scale; twist to rotate the active layer. Settings strip shows a **Layer opacity** slider (plus **30%** / **100%** chips) for the active layer — separate from brush opacity. New overlay layers start ghosted at **35%** so you can line them up against the base photo, then raise opacity (or tap **100%**) before erasing/painting.
 - **Alignment workflow**: Add layer → Move (ghosted) → line up with Layer opacity ~30% → raise to 100% → Erase/Paint as needed
-- **Layers** chip: show/hide the layer panel (hidden by default to maximize canvas)
+- **Layers**: Show/Hide layer list from the Layers category (hidden by default to maximize canvas)
 - **Export** saves a flattened PNG into Pictures/LayerCut
 
 ## License
