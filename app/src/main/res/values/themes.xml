@@ -4,6 +4,6 @@
         <item name="android:statusBarColor">#FF1B1B1F</item>
         <item name="android:navigationBarColor">#FF1B1B1F</item>
         <item name="android:windowBackground">#FF1B1B1F</item>
-        <item name="android:colorPrimary">#FF7C4DFF</item>
+        <item name="android:colorPrimary">#FF00E8C8</item>
     </style>
 </resources>

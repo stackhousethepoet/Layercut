@@ -135,20 +135,25 @@ fun EditorCanvas(
 
             val active = layers.find { it.id == activeId }
             if (active != null && !active.bitmap.isRecycled) {
-                val outline = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
-                    style = AndroidPaint.Style.STROKE
-                    strokeWidth = 2f / viewport.scale
-                    color = 0xFF7C4DFF.toInt()
-                }
+                val showLayerOutline =
+                    tool == ToolMode.TRANSFORM || tool == ToolMode.DISTORT
                 nc.save()
                 nc.concat(CoordMath.layerDrawMatrix(active))
-                nc.drawRect(
-                    0f,
-                    0f,
-                    active.bitmap.width.toFloat(),
-                    active.bitmap.height.toFloat(),
-                    outline
-                )
+                // Active-layer selection box only in Move/Distort (not Paint/Erase/etc.)
+                if (showLayerOutline) {
+                    val outline = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
+                        style = AndroidPaint.Style.STROKE
+                        strokeWidth = 2f / viewport.scale
+                        color = 0xFF00E8C8.toInt()
+                    }
+                    nc.drawRect(
+                        0f,
+                        0f,
+                        active.bitmap.width.toFloat(),
+                        active.bitmap.height.toFloat(),
+                        outline
+                    )
+                }
                 // Distort anchor + radius guide in layer space
                 if (tool == ToolMode.DISTORT && viewModel.hasDistortAnchor) {
                     val ax = viewModel.distortAnchorX
